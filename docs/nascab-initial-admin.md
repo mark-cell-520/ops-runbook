@@ -147,6 +147,16 @@ openssl enc -d -aes-256-cbc -K "$(printf %s "$sid" | sha256sum | cut -d' ' -f1)"
 
 > `printf %s` 不能换成 `echo`——`echo` 会补一个换行，sha256 就完全不同了。
 > Node 侧 `update(serverId)` 用的是 utf8 字符串本身，没有尾随换行。
+>
+> `sqlite3` 这个 node 模块在 nascab 的 `node_modules` 里**没有安装**，所以别写 node
+> 脚本去读库；用 Python 的 `sqlite3` 标准库读、`openssl` 解密，分工最干净。
+> （`sqlite3` **命令行**工具倒是装着的，`sqlite3 <db> "select ..."` 可以直接用来
+> 查看 `user` / `config` 表，只是不方便做 base64 和 AES。）
+>
+> 脚本解密时把明文落文件再读，不进 `$()`——命令替换会吃掉尾随换行，而密码是可以
+> 被用户改成任意值的（含换行），那样解出来的"明文"和真实值就不一致了。
+> 登录接口的 body 也是用 `json.dumps` 序列化的，不用 shell 插值拼：用户名/密码含
+> `"` 或 `\` 时插值出来的就是非法 JSON。
 
 ---
 
@@ -170,32 +180,7 @@ GET  /api/auth/hasSuperAdmin  探测是否已有管理员
 
 ---
 
-## 5. 排查时实际用到的证据
-
-```bash
-# user 表只有一行，且就是 super_admin
-sqlite3 /app/nascab/data/database/nascab_main.db \
-  "select id,username,type,is_active from user;"
-#  1|<username>|super_admin|1
-
-# config 表里的两个关键键
-sqlite3 ... "select key,value from config where key in ('is_initial_admin','serverId');"
-#  is_initial_admin|1
-#  serverId|<uuid>
-
-# 密码从未被改过：日志里历史上去重只有一个值
-grep -h "^password:" /var/log/nascab.out.log | sort -u      # 唯一一个值
-
-# 解密结果与日志完全一致
-bash scripts/nascab/recover-admin-credentials.sh --verify
-```
-
-> `sqlite3` 这个 node 模块在 nascab 的 `node_modules` 里**没有安装**，所以别写 node 脚本去读库；
-> 用 Python 的 `sqlite3` 标准库读、`openssl` 解密，分工最干净。
-
----
-
-## 6. 结论与建议
+## 5. 结论与建议
 
 - 安装没有问题，服务是好的。
 - 首次设置向导在 2026-10-28 15:42 就完成了，凭据是随机生成的 6+6 位。

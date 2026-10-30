@@ -58,17 +58,36 @@ printf %s "$blob" | base64 -d > "$tmp/ct.bin"
 iv=$(dd if="$tmp/ct.bin" bs=1 count=16 2>/dev/null | od -An -tx1 | tr -d ' \n')
 tail -c +17 "$tmp/ct.bin" > "$tmp/body.bin"
 
-password=$(openssl enc -d -aes-256-cbc -K "$key" -iv "$iv" -in "$tmp/body.bin" 2>/dev/null) \
+# 解密结果直接落文件，不进 $() —— 命令替换会吃掉尾随换行，而密码是可以被用户改成
+# 任意值的（包括带换行），那样解出来的"明文"和真实值就不一致了。
+openssl enc -d -aes-256-cbc -K "$key" -iv "$iv" -in "$tmp/body.bin" \
+            -out "$tmp/pw.bin" 2>/dev/null \
   || { echo "openssl 解密失败（serverId 变过？）" >&2; exit 1; }
+
+password=$(cat "$tmp/pw.bin")
 
 echo "username: $username"
 echo "password: $password"
 
 if [ "$VERIFY" = 1 ]; then
   echo "--- 验证登录 $BASE/api/auth/login ---"
+  # body 用 json.dumps 序列化，不要用 shell 插值拼：用户名/密码是用户可改的任意
+  # 字符串，含 " 或 \ 时插值出来的就是非法 JSON。
+  python3 - "$username" "$tmp/pw.bin" "$tmp/body.json" <<'PY'
+import json, sys
+username, pwfile, out = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(pwfile, "rb") as fh:
+    pw = fh.read()
+try:
+    pw_text = pw.decode("utf-8")
+except UnicodeDecodeError:
+    pw_text = pw.decode("utf-8", "replace")
+with open(out, "w", encoding="utf-8") as fh:
+    json.dump({"username": username, "password": pw_text}, fh, ensure_ascii=False)
+PY
   curl -sS -X POST "$BASE/api/auth/login" \
        -H 'Content-Type: application/json' \
-       -d "{\"username\":\"$username\",\"password\":\"$password\"}" \
+       --data-binary "@$tmp/body.json" \
     | python3 -c '
 import json, sys
 try:

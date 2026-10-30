@@ -11,7 +11,10 @@
 # /root/hermes1/hermes gateway（它有自己的 HERMES_HOME，与这里互不干扰）。
 LOG=/var/log/service-watchdog.log
 BRIDGE_DIR=/root/.local/share/feishu-bridge
-log(){ echo $(date +%F_%T) "$*" >> $LOG; }
+# $(date ...) 和 $LOG 都必须加引号：不加引号时命令替换的结果会被词拆分，日志行内容
+# 含空格就会被拆成多个 echo 参数，而 $LOG 一旦为空，>> 就会重定向到当前目录下一个
+# 叫 "" 的文件或者直接报错。
+log(){ printf '%s %s\n' "$(date +%F_%T)" "$*" >>"$LOG"; }
 
 # 2026-10-29 冻结修复：glibc arena 收敛。
 # 本脚本是 feishu-bridge 的父进程，环境变量经 exec 传给它——它才是 arena 大头。
@@ -82,7 +85,7 @@ start_filebrowser(){
   /app/filebrowser -a 0.0.0.0 -r /root -d /app/filebrowser.db \
     --baseurl /fb --username '<REDACTED:与 PID 1 入口脚本一致>' \
     --password '<REDACTED:同上，bcrypt 哈希，见 secrets/README.md>' \
-    >> $LOG 2>&1 &
+    >>"$LOG" 2>&1 &
 }
 
 sleep ${WD_INITIAL_DELAY:-15}
@@ -90,7 +93,7 @@ log "watchdog started pid=$$ interval=${WD_INTERVAL:-30}s boot=${BOOT_EPOCH} (he
 while true; do
   if ! pgrep -f 'bin/feishu-bridge --config' >/dev/null; then
     log "bridge down -> starting"
-    cd $BRIDGE_DIR && setsid --fork bash start-bridge.sh >> $LOG 2>&1
+    cd "$BRIDGE_DIR" && setsid --fork bash start-bridge.sh >>"$LOG" 2>&1
     log "bridge start issued"
   fi
   if ! port_listening 80 && ! port_listening 443; then

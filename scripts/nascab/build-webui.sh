@@ -18,14 +18,18 @@
 # dart2js output (flutter_bootstrap.js pins compileTarget dart2js), so the dry run
 # is pure overhead here.
 #
-# Run:  bash /root/nascab-scripts/build-webui.sh
-set -uo pipefail
+# Run:  bash build-webui.sh
+set -euo pipefail
 
-FLUTTER=/opt/flutter/flutter/bin/flutter
-CLIENT=/app/nascab/repo/flutter_client
-SERVER=/app/nascab/repo/electron_server
+FLUTTER=${FLUTTER_BIN:-/opt/flutter/flutter/bin/flutter}
+CLIENT=${NASCAB_CLIENT:-/app/nascab/repo/flutter_client}
+SERVER=${NASCAB_SERVER:-/app/nascab/repo/electron_server}
 OUT=$SERVER/web/main
-LOG=/root/flutter-dl/build.log
+LOG=${BUILD_LOG:-/root/flutter-dl/build.log}
+
+# 原脚本假定 /root/flutter-dl 已存在（install-flutter.sh 建过）。单独跑本脚本时
+# 它未必在，>>"$LOG" 会直接失败。
+mkdir -p "$(dirname "$LOG")"
 
 export FLUTTER_SUPPRESS_ANALYTICS=true
 export NODE_USE_ENV_PROXY=1          # flutter's pub uses dart:io HttpClient, but be explicit

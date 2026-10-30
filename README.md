@@ -11,6 +11,7 @@
 | [docs/nascab-headless-deploy.md](docs/nascab-headless-deploy.md) | NasCabOS 以后端服务方式部署的全过程（非 Docker）：依赖安装、资源解包、数据目录、Flutter web 客户端编译、supervisord、nginx 反代、验证、踩坑速查表 |
 | [docs/nascab-initial-admin.md](docs/nascab-initial-admin.md) | 为什么没有"设置账号密码"向导、初始 super_admin 的机制、三种取凭据的渠道、密码的现场解密方法、以及哪些"修复"思路是错的 |
 | [docs/hermes1-migration-freeze-fix.md](docs/hermes1-migration-freeze-fix.md) | hermes 从 `/root/.hermes` 迁到 `/root/hermes1`，搬迁引入的三个故障，glibc arena 收敛，watchdog respawn 风暴与 `/tmp` 冷却陷阱 |
+| [SECURITY.md](SECURITY.md) | **先看这个。** 已知暴露面、复用前必须替换的值、怎么报告问题 |
 
 ## 目录
 
@@ -24,7 +25,7 @@ scripts/
     install-flutter.sh    装 Flutter 3.38.10
     build-webui.sh        编译 web 客户端（--base-href /nascab/ --no-wasm-dry-run）
     download-assets.sh    下载发行版 zip
-    extract-assets.py     解包（本机没有 unzip，用 stdlib zipfile）
+    extract-assets.py     解包（unzip 有装，但用它做 zip-slip 防护 + 补 ELF 可执行位 + 摊平 libs-linux/ 前缀）
     start-nascab.sh       以前台方式启动（调试用）
     memmon-build.sh       编译期间每 5s 采一次 cgroup 内存
     recover-admin-credentials.sh   ★ 现场解出当前 super_admin 明文凭据
@@ -33,6 +34,7 @@ scripts/
   scan-secrets.sh        提交前的密钥自查
 docs/                    见上
 secrets/README.md        哪些值需要在本机补齐、去哪取
+SECURITY.md              已知暴露面与复用注意事项
 local/                   本机私有覆盖，已被 git 忽略（模板见 known-values.txt.example）
 ```
 
@@ -56,10 +58,11 @@ bash scripts/nascab/recover-admin-credentials.sh --verify
 bash scripts/scan-secrets.sh
 ```
 
-## 这个仓库应该是 private
+## 安全说明
 
-`config/` 下的两份文件完整描述了这台机器的服务拓扑、端口、路径，以及一个对外暴露的
-NAS 入口（`/nascab/` 带文件读写、远程终端、docker 管理）。public 等于把攻击面说明书公开。
+先读 [SECURITY.md](SECURITY.md)。要点：`config/` 下的两份文件完整描述了这台机器的服务
+拓扑、端口、路径，以及一个对外暴露的 NAS 入口（`/nascab/` 带文件读写、远程终端、
+docker 管理，且是 `auth_basic off`）。仓库里不含任何真实凭据。
 
 ## 约定
 

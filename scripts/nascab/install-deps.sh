@@ -9,11 +9,11 @@
 #      present. It is removed so native modules keep their plain-Node ABI build
 #      (correct for running under node, wrong only for electron).
 #
-# Run:  bash /root/nascab-scripts/install-deps.sh
-set -uo pipefail
+# Run:  bash install-deps.sh
+set -euo pipefail
 
-SERVER=/app/nascab/repo/electron_server
-LOG=/tmp/nascab-npm-install.log
+SERVER=${NASCAB_SERVER:-/app/nascab/repo/electron_server}
+LOG=${NPM_LOG:-/tmp/nascab-npm-install.log}
 cd "$SERVER" || exit 1
 
 # Node's global fetch ignores the http_proxy/https_proxy env vars by default;
@@ -22,7 +22,10 @@ cd "$SERVER" || exit 1
 export NODE_USE_ENV_PROXY=1
 
 echo "[$(date +%T)] node $(node --version) / npm $(npm --version)"
-cp -p package.json /root/nascab-scripts/package.json.orig
+
+# 备份紧挨着被改的文件放，别写死一个只在某台机器上存在的路径。
+# package.json.orig 已被仓库 .gitignore 的 *.orig 规则覆盖，不会误提交。
+cp -p package.json package.json.orig
 
 echo "[$(date +%T)] removing electron-only postinstall hook"
 npm pkg delete scripts.postinstall || echo "  (no postinstall to delete)"

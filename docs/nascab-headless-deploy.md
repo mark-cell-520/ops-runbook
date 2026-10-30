@@ -30,7 +30,7 @@
 ## 2. 安装依赖：`scripts/nascab/install-deps.sh`
 
 ```bash
-bash /root/nascab-scripts/install-deps.sh      # 或仓库副本 scripts/nascab/install-deps.sh
+bash scripts/nascab/install-deps.sh
 ```
 
 这一步做两件关键的事：
@@ -44,8 +44,16 @@ bash /root/nascab-scripts/install-deps.sh      # 或仓库副本 scripts/nascab/
 
 ### 必须留在 node v22
 
-用 `/root/.hermes/node/bin/node`（v22）。原生模块 nodejieba / better-sqlite3 / sharp /
-node-pty 等都是按 v22 的 ABI 编译的；换到 node 26 会全部加载失败。
+用 v22。这台机器上可用的 v22 有两份：`/root/.hermes/node/bin/node`（hermes 搬迁前留下的）
+和 `/root/hermes1/node/bin/node`，**目前都是 v22.22.2**。原生模块 nodejieba /
+better-sqlite3 / sharp / node-pty 等都是按 v22 的 ABI 编译的；换到 node 26 会全部
+加载失败。
+
+> `config/supervisord.conf` 里 `[program:nascab]` 和 `[program:heartflow-mcp]` 钉的是
+> 前者。hermes 已于 2026-10-29 搬到 `/root/hermes1`，所以这是个已知的脆弱点——哪天
+> `/root/.hermes` 被清理，这两个服务会同时起不来。改成 hermes1 那份更一致，但要
+> `supervisorctl restart nascab heartflow-mcp`，线上配置和仓库副本得一起改。
+> `scripts/nascab/start-nascab.sh` 不钉路径，但会断言 node 大版本是 22。
 
 ### nodejieba 要从源码重编
 
@@ -60,19 +68,34 @@ node_modules/.bin/node-pre-gyp install --build-from-source --module=nodejieba
 
 ---
 
-## 3. 拉取发行版资源：`extract-assets.py`
-
-`unzip` 在这台机器上**没有安装**，所以用 Python 标准库：
+## 3. 拉取发行版资源：`download-assets.sh` + `extract-assets.py`
 
 ```bash
-python3 /root/nascab-scripts/download-assets.sh   # 下载 libs-linux.zip + onnx_models.zip
-python3 /root/nascab-scripts/extract-assets.py    # 用 zipfile 模块解包
+bash scripts/nascab/download-assets.sh     # 下载 + 解包一把做完
+# 只想单独解包（zip 已经在 electron_server 里了）：
+python3 scripts/nascab/extract-assets.py
 ```
 
-两个坑：
+下面所有 `scripts/nascab/*` 都指**仓库里的副本**。这台机器上它们同时被放了一份在
+`/root/nascab-scripts/`，两条路径等价，用哪个都行——但**注意它们是 bash 脚本，
+要用 `bash` 跑，不是 `python3`**（`.sh` 后缀不会让内核选解释器）。
 
-- 发行版 zip **会丢掉可执行位**，解出来后必须 `chmod +x` 每一个 `libs/` 下的 ELF。
-- zip 内的条目带 `libs-linux/` 前缀，解到目标目录后会多一层，注意路径。
+解包为什么用 `extract-assets.py` 而不是 `unzip`：`unzip` 在这台机器上是装着的
+（`/usr/bin/unzip`，6.00），一条命令也能解开。用它是因为有三件事 `unzip` 默认不做，
+而这里必须做：
+
+- **zip-slip 防护。** 发行包条目带 `libs-linux/` 前缀，上游某天若发了含 `../` 或
+  绝对路径的条目，`unzip -o` 会安静写到目标目录外面。脚本逐条 resolve 后校验仍在
+  DEST 之内，否则拒绝解那一条。
+- **补回可执行位。** GitHub Releases 打 zip 时会丢权限位，解出来的 `libs/` 下那些
+  ELF（ffmpeg/ffprobe/...）全是 0644，跑不起来。脚本按 ELF magic 显式 `chmod 0755`
+  （`unzip -X` 在某些构建里能救回来，但不可靠）。
+- **摊平 `libs-linux/` 前缀。** zip 内条目是 `libs-linux/ffmpeg`，直接解会多一层目录，
+  而 `libsPath` 模块按 `libs/ffmpeg` 找。脚本把第一层目录名映射掉。
+
+> `download-assets.sh` **只负责下载**，解包委托给 `extract-assets.py`。它自己不再调
+> `unzip`——早先两处都解，等于用两个工具解两遍，而 `unzip` 那遍既丢可执行位又留
+> `libs-linux/` 前缀，`libsPath` 根本找不到 ffmpeg。
 
 ---
 
@@ -102,9 +125,13 @@ python3 /root/nascab-scripts/extract-assets.py    # 用 zipfile 模块解包
 （`src/api/app.js`）。headless 安装不跑这一步就没有 UI。
 
 ```bash
-bash /root/nascab-scripts/install-flutter.sh   # Flutter 3.38.10 → /opt/flutter
-bash /root/nascab-scripts/build-webui.sh       # → electron_server/web/main
+bash scripts/nascab/install-flutter.sh   # Flutter 3.38.10 → /opt/flutter
+bash scripts/nascab/build-webui.sh       # → electron_server/web/main
 ```
+
+编译期间可以跑 `scripts/nascab/memmon-build.sh` 每 5s 采一次 cgroup 内存，提前发现要 OOM。
+它打的百分比是"占了额度"，不等于有压力——4GiB 里大部分是可回收的 page cache，真正
+判断会不会被 OOM kill 看同行的 `oom_kill` 计数有没有涨。
 
 **为什么是 3.38.10**：`flutter_client/pubspec.yaml` 声明 `environment: sdk: ^3.10.1`，
 3.38.10 是最后一个内置 Dart 还在 3.10 线（3.10.9）的 stable。更新的 stable
@@ -122,8 +149,6 @@ OOM killer 直接 SIGKILL 掉 dart2js（报 `Process exited abnormally with exit
 `main.dart.js` 永远不生成，然后 `/nascab/` 就永远卡在 Flutter 的 loading 状态。
 我们只交付 dart2js 产物（`flutter_bootstrap.js` 也钉死了 `compileTarget dart2js`），
 dry run 在这里是纯开销。
-
-编译期间可以跑 `scripts/nascab/memmon-build.sh` 每 5s 采一次 cgroup 内存，提前发现要 OOM。
 
 ---
 
@@ -215,9 +240,11 @@ curl -s -X POST http://127.0.0.1:6789/api/auth/login \
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | `npm ci` 卡住不动 | Node `fetch` 不读代理 | `export NODE_USE_ENV_PROXY=1` |
-| 原生模块加载失败 | node 版本不是 22 | 用 `/root/.hermes/node/bin/node` |
+| 原生模块加载失败 | node 版本不是 22 | 用任意一份 v22（见 §2），`start-nascab.sh` 会断言大版本 |
 | `nodejieba` 报 GLIBC_2.38 | 预编译二进制不匹配 | `node-pre-gyp install --build-from-source` |
-| `unzip: command not found` | 容器里没装 | 用 `extract-assets.py`（stdlib zipfile） |
+| `unzip: command not found` | ~~容器里没装~~（实际上 `/usr/bin/unzip` 6.00 是装着的） | 用 `extract-assets.py`：它多做 zip-slip 防护、ELF `chmod 0755`、摊平 `libs-linux/` 前缀 |
+| 解出来 `libs/` 下 ELF 是 0644，跑不起来 | GitHub Releases 打 zip 丢权限位 | `extract-assets.py` 自动补；手工则 `chmod +x libs/*` |
+| `libsPath` 找不到 ffmpeg | zip 条目带 `libs-linux/` 前缀，多了一层目录 | 用 `extract-assets.py`（会摊平），别用裸 `unzip -o` |
 | 端口莫名变成 6790 | 端口冲突后被写回数据库 | 改回 `config` 表 + 重启 |
 | `/nascab/` 永远转圈 | wasm dry run 并发编译 OOM，dart2js 被杀 | `--no-wasm-dry-run` 重编 |
 | `/nascab`（无斜杠）404 | Flutter 相对路径解析错 | `location = /nascab { return 308 /nascab/; }` |
