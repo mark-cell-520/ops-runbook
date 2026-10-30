@@ -1,0 +1,15 @@
+# 本机已知真实值 —— 供 scripts/scan-secrets.sh 使用
+#
+# 这个文件已被 .gitignore 忽略，可以安全地写真实值。
+# 用法：cp local/known-values.txt.example local/known-values.txt，然后按下面的格式填。
+#
+# 格式：一行一个 grep -E 模式，`#` 开头是注释，空行忽略。
+# 建议写"足够独特、不会误伤"的子串，而不是整个值——比如 UUID 取前两段。
+# 下面是**占位示例**，全是假值，照格式换成你机器上的真实值。
+
+# --- 示例格式 ---
+# 12345678-1234-1234-1234-1234567890ab
+# abcdef12-3456-7890
+# some-user-name
+# a-placeholder-password
+# example\.example\.com

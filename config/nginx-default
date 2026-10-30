@@ -1,0 +1,226 @@
+server {
+    auth_basic "Please input password";
+    auth_basic_user_file /etc/nginx/htpasswd;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+
+    ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
+    ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
+    
+    client_header_buffer_size 1m;
+    large_client_header_buffers 4 1m;
+
+    # 24h proxy timeouts: keep web terminals and dashboard streams alive when idle
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
+
+    # HTTP to HTTPS redirection or other handling can be added here
+
+    location / {
+        proxy_set_header Host $host;
+        proxy_pass http://127.0.0.1:9119;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Scheme $scheme;
+        proxy_buffers 4 256k;
+        proxy_buffer_size 128k;
+        proxy_busy_buffers_size 256k;
+
+        client_max_body_size 8g;
+    }
+
+    # WebSocket location handling for HTTPS
+    location /wss/ {
+        proxy_pass http://127.0.0.1:9119;  # WebSocket backend
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+
+        # WebSocket specific headers
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Web 终端（web-shell @127.0.0.1:9090）的 WebSocket 端点。
+    # auth_basic 在此处必须关闭：前端 index.js 用
+    #   new WebSocket((https?'wss://':'ws://')+location.host+location.pathname+"cmd/"+token)
+    # 建连，浏览器不会把 HTTP Basic 凭证重放到 WebSocket 握手上，
+    # 于是 /shell/cmd/<token> 恒被 401 打回，终端一闪即 "connection closed."。
+    # 同源的 /shell/login?token= 是 XHR，会自动带上 Basic Auth，仍受 auth_basic 保护；
+    # 它签发的 token 是 ~330 位 base64url 随机串，不可枚举，故放开 cmd 不降低门槛。
+    location /shell/cmd/ {
+        auth_basic off;
+        proxy_pass http://127.0.0.1:9090;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        client_max_body_size 128g;
+    }
+
+    location /shell {
+        proxy_pass http://127.0.0.1:9090;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        client_max_body_size 128g;
+    }
+
+
+
+    # NasCabOS (NAS server) — headless, proxied under a subpath.
+    # auth_basic is OFF on purpose: the user manages their own accounts inside
+    # NasCabOS, same pattern as /fb. Note this puts a full NAS (file read/write,
+    # remote terminal, docker management) on the same public entry as / and /shell.
+    # /nascab/ maps onto the app root, so the Flutter client's absolute
+    # /api/... and asset URLs resolve correctly.
+    location = /nascab {
+        return 308 /nascab/;
+    }
+    location /nascab/ {
+        auth_basic off;
+        proxy_pass http://127.0.0.1:6789/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        client_max_body_size 128g;
+    }
+
+    location /fb {
+        auth_basic off;
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        client_max_body_size 128g;
+    }
+}
+
+server {
+    auth_basic "Please input password";
+    auth_basic_user_file /etc/nginx/htpasswd;
+    listen 80;
+    listen [::]:80;
+    server_name _;
+
+    client_header_buffer_size 1m;
+    large_client_header_buffers 4 1m;
+
+    # 24h proxy timeouts: keep web terminals and dashboard streams alive when idle
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
+
+    # Redirect HTTP to HTTPS
+    location / {
+        proxy_set_header Host $host;
+        proxy_pass http://127.0.0.1:9119;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Scheme $scheme;
+        proxy_buffers 4 256k;
+        proxy_buffer_size 128k;
+        proxy_busy_buffers_size 256k;
+
+        client_max_body_size 8g;
+    }
+
+    # WebSocket location handling for HTTP
+    location /ws/ {
+        proxy_pass http://127.0.0.1:9119;  # WebSocket backend
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+
+        # WebSocket specific headers
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /fb {
+        auth_basic off;
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        client_max_body_size 128g;
+    }
+    # Web 终端（web-shell @127.0.0.1:9090）的 WebSocket 端点。
+    # auth_basic 在此处必须关闭：前端 index.js 用
+    #   new WebSocket((https?'wss://':'ws://')+location.host+location.pathname+"cmd/"+token)
+    # 建连，浏览器不会把 HTTP Basic 凭证重放到 WebSocket 握手上，
+    # 于是 /shell/cmd/<token> 恒被 401 打回，终端一闪即 "connection closed."。
+    # 同源的 /shell/login?token= 是 XHR，会自动带上 Basic Auth，仍受 auth_basic 保护；
+    # 它签发的 token 是 ~330 位 base64url 随机串，不可枚举，故放开 cmd 不降低门槛。
+    location /shell/cmd/ {
+        auth_basic off;
+        proxy_pass http://127.0.0.1:9090;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        client_max_body_size 128g;
+    }
+
+    location /shell {
+        proxy_pass http://127.0.0.1:9090;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        client_max_body_size 128g;
+    }
+
+    # NasCabOS — see the note in the HTTPS server block above.
+    location = /nascab {
+        return 308 /nascab/;
+    }
+    location /nascab/ {
+        auth_basic off;
+        proxy_pass http://127.0.0.1:6789/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        client_max_body_size 128g;
+    }
+}
